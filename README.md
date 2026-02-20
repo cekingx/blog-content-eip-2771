@@ -1,57 +1,72 @@
-# Sample Hardhat 3 Beta Project (`mocha` and `ethers`)
+# EIP-2771 Gasless Transaction Demo
 
-This project showcases a Hardhat 3 Beta project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+A demo project showing how to implement gasless (meta-transaction) ERC20 token minting using [EIP-2771](https://eips.ethereum.org/EIPS/eip-2771).
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Overview
 
-## Project Overview
+In a normal transaction, the user must hold ETH to pay for gas. With meta-transactions (EIP-2771), the user only signs a message off-chain, and a **relayer** submits the transaction and pays the gas on their behalf.
 
-This example project includes:
-
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
-
-## Usage
-
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+```
+User (no ETH)        Relayer (has ETH)       Chain
+     |                      |                   |
+     |--- signs request ---> |                   |
+     |    (off-chain)        |                   |
+     |                      |--- forwarder  --> |
+     |                      |    .execute()     |
+     |                      |                   |--- mint() --> GaslessToken
+     |                      |                   |    _msgSender() = user
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+## How It Works
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+1. **User** encodes the call they want to make (e.g. `mint(500)`) and signs it using EIP-712 typed data — no ETH required.
+2. **Relayer** submits the signed request to `MinimalForwarder.execute()`, paying the gas.
+3. **MinimalForwarder** verifies the signature and calls the target contract, appending the user's address to the calldata.
+4. **GaslessToken** uses `ERC2771Context._msgSender()` to extract the original user's address from the tail of the calldata instead of reading `msg.sender` (which would be the forwarder).
+
+## Contracts
+
+### `GaslessToken`
+
+An ERC20 token that supports meta-transactions by inheriting from both `ERC20` and `ERC2771Context`.
+
+Both `ERC20` and `ERC2771Context` inherit from `Context` (diamond inheritance), so `_msgSender()` and `_msgData()` must be explicitly overridden to resolve the ambiguity:
+
+```solidity
+function _msgSender() internal view override(Context, ERC2771Context) returns (address) {
+    return ERC2771Context._msgSender();
+}
 ```
 
-### Make a deployment to Sepolia
+Exposes two mint functions:
+- `mint()` — mints a fixed amount to the caller
+- `mint(uint256 amount)` — mints a specific amount to the caller
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+### `MinimalForwarder`
 
-To run the deployment to a local chain:
+A wrapper around OpenZeppelin's `MinimalForwarder`. Verifies EIP-712 signatures and forwards calls to the target contract with the original sender appended to the calldata.
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+> Note: `MinimalForwarder` is intended for testing only. For production use, consider a battle-tested solution like [OpenGSN](https://opengsn.org/).
+
+## Project Structure
+
+```
+contracts/
+  GaslessToken.sol       # ERC20 + ERC2771Context token
+  MinimalForwarder.sol   # Wrapper to expose OZ MinimalForwarder as artifact
+test/
+  GaslessToken.ts        # Meta-transaction test scenarios
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+## Running Tests
 
 ```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+npx hardhat test test/GaslessToken.ts
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+## Dependencies
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+- [Hardhat 3](https://hardhat.org)
+- [OpenZeppelin Contracts v4](https://docs.openzeppelin.com/contracts/4.x/)
+- ethers.js v6
+- Mocha + Chai
