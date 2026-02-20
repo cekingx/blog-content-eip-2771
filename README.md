@@ -8,13 +8,13 @@ In a normal transaction, the user must hold ETH to pay for gas. With meta-transa
 
 ```
 User (no ETH)        Relayer (has ETH)       Chain
-     |                      |                   |
+     |                       |                   |
      |--- signs request ---> |                   |
      |    (off-chain)        |                   |
-     |                      |--- forwarder  --> |
-     |                      |    .execute()     |
-     |                      |                   |--- mint() --> GaslessToken
-     |                      |                   |    _msgSender() = user
+     |                       |--- forwarder  --> |
+     |                       |    .execute()     |
+     |                       |                   |--- mint() --> GaslessToken
+     |                       |                   |    _msgSender() = user
 ```
 
 ## How It Works
